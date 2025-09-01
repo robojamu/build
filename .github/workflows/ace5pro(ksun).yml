@@ -114,12 +114,12 @@ jobs:
       - name: Set up KernelSU Next
         run: |
           cd kernel_workspace/kernel_platform
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/next-susfs/kernel/setup.sh" | bash -s next-susfs
           cd KernelSU-Next
-          KSU_VERSION=$(expr $(/usr/bin/git rev-list --count HEAD) "+" 10200)
+          KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/commits?sha=next&per_page=1" | grep -i "link:" | sed -n 's/.*page=\([0-9]*\)>; rel="last".*/\1/p') "+" 10200)
           echo "KSUVER=$KSU_VERSION" >> $GITHUB_ENV
           sed -i "s/DKSU_VERSION=11998/DKSU_VERSION=${KSU_VERSION}/" kernel/Makefile
-
+          
       - name: Set up SUSFS & apply patches
         run: |
          set -e
@@ -130,38 +130,50 @@ jobs:
          git clone https://github.com/zzh20188/GKI_KernelSU_SUSFS.git zzh_patch
          git clone --depth=1 https://github.com/egcd123/boot.git
          cd kernel_platform
+         echo "正在拉取susfs补丁"
          cp ../susfs4ksu/kernel_patches/50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch ./common/
-         cp ../susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU-Next/
+         cp ../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./common/
+         cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+         cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
          cp ../zzh_patch/next-patch/* ./KernelSU-Next/
          cp ../susfs4ksu/kernel_patches/fs/* ./common/fs/
+         cp -r ../zzh_patch/zram/lz4/* ./common/lib/lz4/
+         cp -r ../zzh_patch/zram/include/linux/* ./common/include/linux/
+         cp -r ../zzh_patch/zram/${{ inputs.kernel_version }}/lz4_1.10.0.patch ./common/
+         cd ./common
+         for file in \
+         "lib/lz4/lz4_compress.c" \
+         "lib/lz4/lz4_decompress.c" \
+         "lib/lz4/lz4defs.h" \
+         "lib/lz4/lz4hc_compress.c"
+         do
+         if [ -f "$file" ]; then
+         echo "🗑️ 正在删除：$file"
+         rm -f "$file"
+         else
+         echo "⚠️ 文件不存在：$file"
+         fi
+         done
+         cd ../
          cp ../susfs4ksu/kernel_patches/include/linux/* ./common/include/linux/
          cp -r ../SukiSU_patch/other/zram/lz4k/include/linux/* ./common/include/linux || true
          cp -r ../SukiSU_patch/other/zram/lz4k/lib/* ./common/lib || true
          cp -r ../SukiSU_patch/other/zram/lz4k/crypto/* ./common/crypto || true
          cp -r ../SukiSU_patch/other/zram/lz4k_oplus ./common/lib/ || true
-         cp ../boot/1.patch ./common/
-         cd ./KernelSU-Next
-         patch -p1 --forward --fuzz=3 < 10_enable_susfs_for_ksu.patch || true
-         patch -p1 --fuzz=3 --forward < apk_sign.patch || true
-         patch -p1 --fuzz=3 --forward < core_hook.patch || true
-         patch -p1 --fuzz=3 --forward < ksud.patch || true
-         patch -p1 --fuzz=3 --forward < selinux.patch || true
-         patch -p1 --fuzz=3 --forward < rules.c.patch || true
-         patch -p1 --fuzz=3 --forward < sucompat.c.patch || true
-         patch -p1 --fuzz=3 --forward < kernel_compat.c.patch || true
-         cd ../common
-         if [[ "${{ github.event.inputs.FEIL }}" == "oneplus_13" || "${{ github.event.inputs.FEIL }}" == "oneplus_ace5_pro" ]]; then
-           sed -i 's/-32,12 +32,38/-32,11 +32,37/g' 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch
-           sed -i '/#include <trace\/hooks\/fs.h>/d' 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch
-         fi
+         cp ../111/boot.patch ./common/
+         cd ./common/
+         # if [[ "${{ github.event.inputs.FEIL }}" == "oneplus_13" || "${{ github.event.inputs.FEIL }}" == "oneplus_ace5_pro" ]]; then
+         # sed -i 's/-32,12 +32,38/-32,11 +32,37/g' 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch
+         # sed -i '/#include <trace\/hooks\/fs.h>/d' 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch
+         # fi
           patch -p1 < 50_add_susfs_in_gki-${{ github.event.inputs.ANDROID_VERSION }}-${{ github.event.inputs.KERNEL_VERSION }}.patch || true
           # Replace next_hooks.patch with syscall_hooks.patch
           cp ../../kernel_patches/69_hide_stuff.patch ./
-          cp ../../kernel_patches/next/scope_min_manual_hooks_v1.4.patch ./
-          patch -p1 -F 3 < scope_min_manual_hooks_v1.4.patch
           patch -p1 -F 3 < 69_hide_stuff.patch
-          patch -p1 -F 3 < 1.patch
-          echo "✅ SUSFS 和 syscall_hooks patch 应用完成"
+          patch -p1 --fuzz=3 < scope_min_manual_hooks_v1.4.patch
+          patch -s -p1 -F 3 < boot.patch || true
+          patch -p1 -F 3 --fuzz=5 < lz4_1.10.0.patch || true
+          echo "✅ SUSFS 和 scope_min_manual_hooks_v1.4 patch 应用完成"
 
       - name: Apply lz4kd Patches
         run: |
