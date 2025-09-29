@@ -123,8 +123,8 @@ jobs:
         run: |
           cd kernel_workspace/kernel_platform
           curl -LSs "https://raw.githubusercontent.com/pershoot/KernelSU-Next/next-susfs/kernel/setup.sh" | bash -s next-susfs
-          git reset --hard 605a52864ca43406e2cb54ae75fd0057c8eabf2d
           cd KernelSU-Next
+          git reset --hard 605a52864ca43406e2cb54ae75fd0057c8eabf2d
 
           # 获取 next 分支 commit 数量并加上 10200
           KSU_VERSION=$(expr $(curl -sI "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/commits?sha=next&per_page=1" \
